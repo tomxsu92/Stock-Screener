@@ -53,6 +53,21 @@
   .picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
   .pick { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; }
   .pick:hover { border-color: var(--accent); }
+  .watch { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .wcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; }
+  .wcard:hover { border-color: var(--accent); }
+  .wcard .top { display: flex; justify-content: space-between; align-items: center; }
+  .wcard .px { font-family: var(--mono); font-size: 18px; margin: 4px 0 8px; }
+  .alert { border-radius: 8px; padding: 7px 9px; font-size: 13px; margin-bottom: 8px; }
+  .alert.in { background: #12361f; color: var(--green); }
+  .alert.up { background: #14284a; color: #a9cbff; }
+  .alert.down { background: #3a2c0d; color: #ffd98a; }
+  .alert small { display: block; opacity: .8; font-size: 11px; }
+  .wrow { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .wrow b { color: var(--text); font-weight: 600; }
+  .star { background: none; border: 0; cursor: pointer; font-size: 16px; color: var(--gray); padding: 0 6px 0 0; line-height: 1; }
+  .star.on { color: var(--amber); }
+  .hint { color: var(--muted); font-size: 12px; text-transform: none; letter-spacing: 0; }
   .pick .top { display: flex; justify-content: space-between; align-items: center; }
   .pick .tk { font-weight: 700; font-size: 16px; }
   .pick .nm { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -126,6 +141,7 @@
     .controls { grid-template-columns: 1fr 1fr; }
     .controls > div:first-child { grid-column: 1 / -1; }
     .picks { grid-template-columns: 1fr; }
+    .watch { grid-template-columns: 1fr 1fr; }
     .plan-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>
@@ -165,6 +181,11 @@
   </div>
 
   <div class="chips" id="chips"></div>
+
+  <div id="watchWrap">
+    <div class="section-title">★ My watchlist <span class="hint">— tap ☆ next to any stock to add or remove it</span></div>
+    <div class="watch" id="watch"></div>
+  </div>
 
   <div id="picksWrap">
     <div class="section-title">Best setups right now (high score + in buy zone or uptrend)</div>
@@ -212,7 +233,7 @@
   const sigCls = s => (SIGNALS.find(x => x.key === s) || {}).cls || "b-watch";
 
   const COLS = [
-    { key: "ticker", label: "Stock", cls: "l", render: s => `<span class="tk">${s.ticker}</span><span class="nm">${esc(s.name)}</span>` },
+    { key: "ticker", label: "Stock", cls: "l", render: s => `${starBtn(s.ticker)}<span class="tk">${s.ticker}</span><span class="nm">${esc(s.name)}</span>` },
     { key: "score", label: "Score", render: s => scoreCell(s.score) },
     { key: "signal", label: "Signal", cls: "l", render: s => `<span class="badge ${sigCls(s.signal)}">${s.signal}</span>` },
     { key: "price", label: "Price", num: 1, render: s => money(s.price) },
@@ -227,7 +248,26 @@
     { key: "spark", label: "6 mo", sortable: false, render: s => spark(s.spark) },
   ];
 
-  const state = { data: [], q: "", sector: "", minScore: 0, maxPe: null, signals: new Set(), sort: "score", dir: -1 };
+  const state = { data: [], q: "", sector: "", minScore: 0, maxPe: null, signals: new Set(), sort: "score", dir: -1, watchOnly: false };
+  const DEFAULT_WATCH = ["NVDA", "TSM", "AMD", "AVGO"];
+  let watch = DEFAULT_WATCH.slice();
+  try { const w = JSON.parse(localStorage.getItem("watchlist")); if (Array.isArray(w)) watch = w; } catch (e) {}
+  const saveWatch = () => { try { localStorage.setItem("watchlist", JSON.stringify(watch)); } catch (e) {} };
+  const isWatched = t => watch.includes(t);
+  function toggleWatch(t) {
+    watch = isWatched(t) ? watch.filter(x => x !== t) : [...watch, t];
+    saveWatch(); renderWatch(); renderChips(); renderTable();
+  }
+  const starBtn = t => `<button class="star ${isWatched(t) ? "on" : ""}" data-star="${t}" title="Add/remove from watchlist">${isWatched(t) ? "★" : "☆"}</button>`;
+
+  // Where is the price relative to the entry zone, and what alert to set
+  function alertInfo(s) {
+    if (s.price > s.entry_high) return { cls: "down", text: `Alert: falls below ${money(s.entry_high)}`,
+      sub: `${((s.price / s.entry_high - 1) * 100).toFixed(1)}% above the entry zone` };
+    if (s.price < s.entry_low) return { cls: "up", text: `Alert: rises above ${money(s.entry_low)}`,
+      sub: `${((1 - s.price / s.entry_low) * 100).toFixed(1)}% below the entry zone` };
+    return { cls: "in", text: "In the entry zone now", sub: `Zone ${money(s.entry_low)}–${money(s.entry_high)}` };
+  }
   const $ = id => document.getElementById(id);
 
   // ---------- formatting
@@ -292,7 +332,8 @@
       (!state.sector || s.sector === state.sector) &&
       s.score >= state.minScore &&
       (state.maxPe == null || (s.forward_pe != null && s.forward_pe > 0 && s.forward_pe <= state.maxPe)) &&
-      (!state.signals.size || state.signals.has(s.signal))
+      (!state.signals.size || state.signals.has(s.signal)) &&
+      (!state.watchOnly || isWatched(s.ticker))
     ).sort((a, b) => {
       const k = state.sort, av = a[k], bv = b[k];
       if (av == null && bv == null) return 0;
@@ -310,9 +351,24 @@
   function renderChips() {
     const counts = {};
     state.data.forEach(s => counts[s.signal] = (counts[s.signal] || 0) + 1);
-    $("chips").innerHTML = SIGNALS.map(s =>
+    $("chips").innerHTML = `<span class="chip ${state.watchOnly ? "on" : ""}" data-watch="1">★ Watchlist<span class="n">${watch.length}</span></span>` + SIGNALS.map(s =>
       `<span class="chip ${state.signals.has(s.key) ? "on" : ""}" data-sig="${s.key}">${s.key}<span class="n">${counts[s.key] || 0}</span></span>`).join("") +
       `<span class="spacer"></span><button class="linkbtn" id="reset">Reset filters</button>`;
+  }
+
+  function renderWatch() {
+    const items = watch.map(t => state.data.find(s => s.ticker === t)).filter(Boolean);
+    $("watchWrap").hidden = !items.length;
+    $("watch").innerHTML = items.map(s => { const a = alertInfo(s); return `
+      <div class="wcard" data-t="${s.ticker}">
+        <div class="top"><span>${starBtn(s.ticker)}<span class="tk">${s.ticker}</span></span><span class="badge ${sigCls(s.signal)}">${s.signal}</span></div>
+        <div class="px">${money(s.price)} <span style="font-size:12px">${pct(s.change_1d)}</span></div>
+        <div class="alert ${a.cls}">${a.text}<small>${a.sub}</small></div>
+        <div class="wrow"><span>Stop</span><b>${money(s.stop)}</b></div>
+        <div class="wrow"><span>Target 1</span><b>${money(s.target1)}</b></div>
+        <div class="wrow"><span>Reward/risk</span><b>${s.reward_risk ?? "—"}×</b></div>
+        <div class="wrow"><span>Score</span><b>${s.score}</b></div>
+      </div>`; }).join("");
   }
 
   function renderPicks() {
@@ -347,7 +403,7 @@
     const sb = (label, v) => `<div class="sbar"><span>${label}</span><div class="bar"><i style="width:${v}%;background:${scoreColor(v)}"></i></div><span>${v}</span></div>`;
     $("drawer").innerHTML = `
       <div class="hd">
-        <div><h2>${s.ticker} <span class="badge ${sigCls(s.signal)}" style="vertical-align:middle">${s.signal}</span></h2>
+        <div><h2>${starBtn(s.ticker)}${s.ticker} <span class="badge ${sigCls(s.signal)}" style="vertical-align:middle">${s.signal}</span></h2>
         <div class="note">${esc(s.name)} · ${esc(s.sector)}${s.industry ? " · " + esc(s.industry) : ""}</div>
         <div style="margin-top:6px;font-family:var(--mono);font-size:18px">${money(s.price)} <span style="font-size:13px">${pct(s.change_1d)}</span></div></div>
         <button class="close" id="closeBtn" aria-label="Close">×</button>
@@ -415,11 +471,12 @@
     $("maxPe").addEventListener("input", e => { state.maxPe = e.target.value === "" ? null : +e.target.value; renderTable(); });
     $("chips").addEventListener("click", e => {
       if (e.target.id === "reset") {
-        Object.assign(state, { q: "", sector: "", minScore: 0, maxPe: null, signals: new Set(), sort: "score", dir: -1 });
+        Object.assign(state, { q: "", sector: "", minScore: 0, maxPe: null, signals: new Set(), sort: "score", dir: -1, watchOnly: false });
         $("q").value = ""; $("sector").value = ""; $("minScore").value = 0; $("minScoreOut").textContent = "0"; $("maxPe").value = "";
         return render();
       }
       const chip = e.target.closest(".chip"); if (!chip) return;
+      if (chip.dataset.watch) { state.watchOnly = !state.watchOnly; renderChips(); return renderTable(); }
       const k = chip.dataset.sig;
       state.signals.has(k) ? state.signals.delete(k) : state.signals.add(k);
       renderChips(); renderTable();
@@ -430,6 +487,12 @@
       if (state.sort === k) state.dir *= -1; else { state.sort = k; state.dir = (k === "ticker" || k === "signal") ? 1 : -1; }
       renderHead(); renderTable();
     });
+    document.addEventListener("click", e => {
+      const b = e.target.closest("[data-star]"); if (!b) return;
+      e.stopPropagation(); toggleWatch(b.dataset.star);
+      if ($("drawer").classList.contains("open")) openDetail(b.dataset.star);
+    }, true);
+    $("watch").addEventListener("click", e => { const c = e.target.closest(".wcard"); if (c) openDetail(c.dataset.t); });
     $("tbody").addEventListener("click", e => { const tr = e.target.closest("tr[data-t]"); if (tr) openDetail(tr.dataset.t); });
     $("picks").addEventListener("click", e => { const p = e.target.closest(".pick"); if (p) openDetail(p.dataset.t); });
     $("overlay").addEventListener("click", closeDetail);
@@ -449,7 +512,7 @@
       $("updated").innerHTML = `${state.data.length} stocks · updated<br>${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
       const sectors = [...new Set(state.data.map(s => s.sector).filter(Boolean))].sort();
       $("sector").insertAdjacentHTML("beforeend", sectors.map(s => `<option>${esc(s)}</option>`).join(""));
-      renderPicks(); render();
+      renderWatch(); renderPicks(); render();
       if (location.hash.length > 1) openDetail(decodeURIComponent(location.hash.slice(1)).toUpperCase());
     } catch (err) {
       $("updated").textContent = "";
