@@ -2,8 +2,11 @@ name: Update stock data
 
 on:
   schedule:
-    # Weekdays at 22:30 UTC (2:30 PM Pacific), after the US market closes
-    - cron: "30 22 * * 1-5"
+    # During market hours: about every hour, weekdays (13:17-20:17 UTC covers
+    # 9:30 AM-4 PM Eastern in both summer and winter time). Odd minute = less GitHub delay.
+    - cron: "17 13-20 * * 1-5"
+    # After the close: final numbers for the day
+    - cron: "37 21 * * 1-5"
   workflow_dispatch: {}   # lets you click "Run workflow" on the Actions tab
 
 permissions:

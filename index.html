@@ -499,6 +499,16 @@
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
   }
 
+  // Was the data captured while the US market was open? (uses New York time)
+  function marketLabel(d) {
+    const ny = new Date(d.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const mins = ny.getHours() * 60 + ny.getMinutes(), day = ny.getDay();
+    const open = day >= 1 && day <= 5 && mins >= 570 && mins < 960;
+    return open
+      ? '<span class="badge b-wait" title="Prices are mid-day (about 15 min delayed). Signals and plans can change by the close.">● Intraday</span>'
+      : '<span class="badge b-watch" title="Based on the most recent closing prices.">Closing prices</span>';
+  }
+
   // ---------- load
   async function load() {
     try {
@@ -509,7 +519,7 @@
       state.demo = !!json.demo;
       $("demoBanner").hidden = !json.demo;
       const d = new Date(json.generated_at);
-      $("updated").innerHTML = `${state.data.length} stocks · updated<br>${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+      $("updated").innerHTML = `${state.data.length} stocks · updated<br>${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}<br>${marketLabel(d)}`;
       const sectors = [...new Set(state.data.map(s => s.sector).filter(Boolean))].sort();
       $("sector").insertAdjacentHTML("beforeend", sectors.map(s => `<option>${esc(s)}</option>`).join(""));
       renderWatch(); renderPicks(); render();
